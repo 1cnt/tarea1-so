@@ -1,17 +1,17 @@
-# Planificador Dieciochero - Tarea 1 Sistemas Operativos
+# Tarea 1 Sistemas Operativos
 
 ## Integrantes
--Nombre 1
--Nombre 2
+Rodrigo Cantin
+Benjamín Oyarzún
 
-## Descripcion
+## Descripción
 
-## Compilacion y uso
+## Compilación y uso
 
 ## Formato de plan.txt
 
 ## Funciones implementadas
 
-## Decisiones de diseno
+## Decisiones de diseño
 
 ## Pruebas realizadas

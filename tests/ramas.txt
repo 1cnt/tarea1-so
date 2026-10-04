@@ -1,0 +1,7 @@
+1: raiz_buena: 100:
+2: raiz_mala: 100:
+3: hijo_de_mala: 100: 2
+4: nieto_de_mala: 100: 3
+5: une_ambas: 100: 1, 4
+6: hijo_de_buena: 100: 1
+7: sigue_sola: 300: 6

@@ -1,0 +1,11 @@
+1: tarea_normal: 500:
+
+
+  2   :   tarea_con_espacios   :   300   :   1   
+
+3: tarea_sin_tiempo:: 1,2
+4: tarea_sin_deps: 400:
+5: tarea_vacia::
+
+3: ID_repetido: 100: 4
+6: dependencias_fantasmas: 200: 99, 100

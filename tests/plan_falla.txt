@@ -1,0 +1,5 @@
+1: prender_carbon: 500:
+2: comprar_carne: 1200:
+3: error_corte_luz: 300: 1
+4: asar_longaniza: 800: 2,3
+5: servir_mesa: 100: 4

@@ -28,7 +28,13 @@ int main(int argc, char* argv[]) {
     RawPlan* raw_plan = parser_parse_file(argv[1]);
     if (!raw_plan) return 1;
 
-    DAG* dag = dag_build(raw_plan);
+    char err[512] = "";
+    DAG* dag = dag_build(raw_plan, err, sizeof err);
+    if (!dag) {
+        fprintf(stderr, "Error en el plan: %s\n", err);
+        parser_free_plan(raw_plan);
+        return 1;
+    }
 
     printf("[PLANIFICADOR] Iniciando simulación con K = %d\n", K_limit);
 
@@ -57,6 +63,7 @@ int main(int argc, char* argv[]) {
             int task_idx = ready_queue[q_front++];
             Activity* act = &dag->array[task_idx];
 
+            fflush(stdout);
             pid_t pid = fork(); // ¡Nace un proceso!
             if (pid < 0) {
                 perror("Error en fork");
@@ -70,7 +77,8 @@ int main(int argc, char* argv[]) {
                 // Dormir para simular que está trabajando en la actividad
                 usleep((useconds_t)act->duration_ms * 1000);
                 
-                exit(0); // Termina sin errores
+                fflush(stdout);
+                _exit(0); // Termina sin errores
             } else {
                 // ================= PROCESO PADRE =================
                 act->running = true;

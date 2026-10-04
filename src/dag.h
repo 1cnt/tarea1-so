@@ -3,6 +3,7 @@
 
 #include "parser.h"
 #include <stdbool.h>
+#include <stddef.h>
 
 typedef struct {
     char id[MAX_ID_LEN];
@@ -11,7 +12,7 @@ typedef struct {
 
     int in_degree;           // Contador: Cuántas dependencias le faltan para estar lista
     int* dependents;         // Arreglo de posiciones de las actividades que dependen de esta
-    int dep_count;
+    int dep_count;           // Cuántas actividades dependen de esta (largo de dependents)
     int dep_capacity;
 
     bool running;
@@ -26,8 +27,10 @@ typedef struct {
     int count;
 } DAG;
 
-// Toma los datos crudos del parser y construye el grafo conectado
-DAG* dag_build(RawPlan* plan);
+// Toma los datos crudos del parser y construye el grafo conectado.
+// Devuelve NULL si el plan es invalido (ID repetido, dependencia que no
+// existe, duracion negativa o ciclo) y deja en err un mensaje legible.
+DAG* dag_build(RawPlan* plan, char* err, size_t err_tam);
 void dag_free(DAG* dag);
 
 #endif // DAG_H

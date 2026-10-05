@@ -6,10 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Cuantos IDs se muestran como maximo al describir un ciclo.
 #define MAX_IDS_EN_CICLO 8
 
-// Par (ID, posicion) para el indice ordenado que usa bsearch.
 typedef struct {
     const char* id;
     int pos;
@@ -36,7 +34,6 @@ static void poner_error(char* err, size_t err_tam, const char* fmt, ...) {
     va_end(ap);
 }
 
-// Agrega txt al final de buf sin desbordarlo. *uso lleva el largo escrito.
 static void anexar(char* buf, size_t tam, size_t* uso, const char* txt) {
     int w;
 
@@ -45,8 +42,6 @@ static void anexar(char* buf, size_t tam, size_t* uso, const char* txt) {
     if (w > 0) *uso += (size_t)w;
 }
 
-// Escribe en err el ciclo camino[desde..hasta]. Cada actividad depende de
-// la siguiente, y la ultima depende de la primera.
 static void describir_ciclo(const DAG* dag, const int* camino, int desde,
                             int hasta, char* err, size_t err_tam) {
     size_t uso = 0;
@@ -84,9 +79,9 @@ void dag_free(DAG* dag) {
 DAG* dag_build(RawPlan* plan, char* err, size_t err_tam) {
     DAG* dag = NULL;
     EntradaIndice* indice = NULL;
-    int** deps = NULL;     // deps[i]: posiciones de las que depende i (sin repetir)
+    int** deps = NULL;     
     int* n_deps = NULL;
-    int* cola = NULL;      // cola de Kahn; luego se reusa como camino del ciclo
+    int* cola = NULL;     
     int* pend = NULL;
     int* visita = NULL;
     int cabeza = 0;
@@ -117,7 +112,6 @@ DAG* dag_build(RawPlan* plan, char* err, size_t err_tam) {
     }
     dag->count = n;
 
-    // 1. Traspasar los datos y armar el indice (ID -> posicion).
     for (int i = 0; i < n; i++) {
         Activity* act = &dag->array[i];
         const RawActivity* raw = &plan->items[i];
@@ -134,7 +128,6 @@ DAG* dag_build(RawPlan* plan, char* err, size_t err_tam) {
         indice[i].pos = i;
     }
 
-    // 2. Ordenar el indice y detectar IDs repetidos (quedan vecinos).
     qsort(indice, (size_t)n, sizeof *indice, cmp_entradas);
     for (int i = 1; i < n; i++) {
         if (strcmp(indice[i - 1].id, indice[i].id) == 0) {
@@ -144,7 +137,6 @@ DAG* dag_build(RawPlan* plan, char* err, size_t err_tam) {
         }
     }
 
-    // 3. Traducir las dependencias de texto a posiciones (sin repetidas).
     for (int i = 0; i < n; i++) {
         const RawActivity* raw = &plan->items[i];
         int nd = raw->raw_dep_count;
@@ -181,7 +173,6 @@ DAG* dag_build(RawPlan* plan, char* err, size_t err_tam) {
         dag->array[i].in_degree = m;
     }
 
-    // 4. Armar las listas de dependientes en dos pasadas (memoria exacta).
     for (int i = 0; i < n; i++)
         for (int k = 0; k < n_deps[i]; k++)
             dag->array[deps[i][k]].dep_count++;
@@ -195,7 +186,7 @@ DAG* dag_build(RawPlan* plan, char* err, size_t err_tam) {
                 goto limpiar;
             }
             a->dep_capacity = a->dep_count;
-            a->dep_count = 0;   // ahora sirve de cursor
+            a->dep_count = 0; 
         }
     }
     for (int i = 0; i < n; i++) {
@@ -205,7 +196,6 @@ DAG* dag_build(RawPlan* plan, char* err, size_t err_tam) {
         }
     }
 
-    // 5. Detectar ciclos con el algoritmo de Kahn (orden topologico).
     for (int i = 0; i < n; i++) {
         pend[i] = n_deps[i];
         if (pend[i] == 0) cola[cantidad++] = i;
@@ -219,9 +209,6 @@ DAG* dag_build(RawPlan* plan, char* err, size_t err_tam) {
     }
 
     if (cantidad < n) {
-        // Los nodos con pend > 0 estan en un ciclo o cuelgan de uno. Cada
-        // uno tiene una dependencia que tambien quedo sin procesar, asi que
-        // seguirlas termina repitiendo un nodo, y ese tramo es un ciclo.
         int actual = 0;
         int largo = 0;
 

@@ -3,9 +3,8 @@ CFLAGS = -Wall -Wextra -std=c17 -lpthread -O2
 
 TARGET = planificador
 
-SRCS = main.c parser.c dag.c
+SRCS = src/main.c src/parser.c src/dag.c
 OBJS = $(SRCS:.c=.o)
-HEADERS = parser.h dag.h
 
 .PHONY: all clean
 
@@ -14,7 +13,7 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
 
-%.o: %.c $(HEADERS)
+%.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:

@@ -17,47 +17,40 @@
 #include "dag.h"
 #include "parser.h"
 
-// Largo maximo (con el '\n' final) del mensaje que una actividad deja en su pipe.
 #define MAX_MSG 128
-// Descriptores de archivo que se dejan libres para stdin/stdout/stderr y pipes transitorios.
 #define RESERVA_FDS 32
 
 typedef enum { PENDIENTE, LISTA, CORRIENDO, TERMINADA, FALLIDA, ABORTADA } Estado;
 
-// Una ranura de la tabla de procesos activos (K ranuras en total).
 typedef struct {
     pid_t pid;
-    int task_idx;   // actividad que corre en este proceso; -1 si la ranura esta libre
-    int fd_up;      // extremo de lectura del pipe por donde el hijo deja su mensaje
+    int task_idx;  
+    int fd_up;    
 } ActiveProcess;
 
-// Todo el estado del planificador. Solo lo toca el proceso padre
-// (los hijos usan una copia y solo leen la tabla de ranuras para cerrar fds).
 typedef struct {
     DAG* dag;
-    Estado* estado;          // estado de cada actividad
-    int* dep_off;            // dependencias de cada actividad, en formato CSR:
-    int* dep_idx;            //   las de i estan en dep_idx[dep_off[i] .. dep_off[i+1]-1]
-    int* cola;               // cola FIFO de actividades listas (cada una entra una sola vez)
+    Estado* estado;          
+    int* dep_off;            
+    int* dep_idx;            
+    int* cola;               
     int q_front;
     int q_rear;
-    int* pila;               // pila explicita para abortar ramas sin recursion
+    int* pila;               
     ActiveProcess* slots;
-    int n_slots;             // K efectivo
-    int* libres;             // pila de ranuras libres
+    int n_slots;             
+    int* libres;             
     int n_libres;
-    int activos;             // procesos vivos o sin cosechar (ocupan cupo de K)
+    int activos;             
     int terminadas;
     int fallidas;
     int abortadas;
-    bool sin_recursos;       // fork/pipe fallaron: no reintentar hasta cosechar un hijo
+    bool sin_recursos;    
 } Plan;
 
 static Plan P;
 static volatile sig_atomic_t g_sigint = 0;
-static sigset_t g_mask_orig;     // mascara de senales original (sin bloqueos)
-
-// ---------------------------------------------------------------- utilidades
+static sigset_t g_mask_orig;    
 
 static void log_linea(const char* fmt, ...) {
     va_list ap;
@@ -85,7 +78,6 @@ static void encolar(int i) {
     P.cola[P.q_rear++] = i;
 }
 
-// Escribe todo el buffer (maneja escrituras parciales). Devuelve 0 o -1.
 static int escribir_todo(int fd, const char* buf, size_t n) {
     size_t hecho = 0;
 
@@ -100,7 +92,6 @@ static int escribir_todo(int fd, const char* buf, size_t n) {
     return 0;
 }
 
-// Lee el mensaje del hijo hasta EOF o hasta llenar cap-1 bytes. Devuelve los bytes leidos.
 static int leer_mensaje(int fd, char* buf, size_t cap) {
     size_t total = 0;
 
@@ -120,14 +111,11 @@ static int leer_mensaje(int fd, char* buf, size_t cap) {
     return (int)total;
 }
 
-// ---------------------------------------------------------------- senales
-
 static void on_sigint(int s) {
     (void)s;
     g_sigint = 1;
 }
 
-// Handler vacio: sin handler, SIGCHLD se ignora y sigsuspend nunca despertaria.
 static void on_sigchld(int s) {
     (void)s;
 }
@@ -136,7 +124,6 @@ static void configurar_senales(void) {
     sigset_t bloqueo;
     struct sigaction sa;
 
-    // Primero se bloquean: cualquier senal que llegue queda pendiente, no se pierde.
     sigemptyset(&bloqueo);
     sigaddset(&bloqueo, SIGCHLD);
     sigaddset(&bloqueo, SIGINT);
@@ -151,13 +138,11 @@ static void configurar_senales(void) {
     sa.sa_flags = SA_NOCLDSTOP;
     sigaction(SIGCHLD, &sa, NULL);
 
-    // Escribir en un pipe cuyo lector murio no debe matar al planificador.
     sa.sa_handler = SIG_IGN;
     sa.sa_flags = 0;
     sigaction(SIGPIPE, &sa, NULL);
 }
 
-// SIGINT llego si el handler ya corrio o si esta pendiente (bloqueada).
 static bool hay_sigint(void) {
     sigset_t pendientes;
 
@@ -166,10 +151,6 @@ static bool hay_sigint(void) {
     return sigismember(&pendientes, SIGINT) == 1;
 }
 
-// ---------------------------------------------------------------- fallas
-
-// Aborta (marca ABORTADA) todos los descendientes de la actividad f, sin recursion.
-// Siempre estan PENDIENTE: nunca nacieron, asi que no hay procesos que matar.
 static void abortar_rama(int f) {
     Activity* A = P.dag->array;
     int sp = 0;
@@ -205,7 +186,6 @@ static void finalizar_ok(int i, const char* msg) {
     for (int k = 0; k < A[i].dep_count; k++) {
         int d = A[i].dependents[k];
         A[d].in_degree--;
-        // Solo entra a la cola si sigue PENDIENTE (una abortada no debe lanzarse).
         if (A[d].in_degree == 0 && P.estado[d] == PENDIENTE) encolar(d);
     }
 }
@@ -218,8 +198,6 @@ static void finalizar_fallo(int i, const char* motivo) {
     abortar_rama(i);
 }
 
-// ---------------------------------------------------------------- procesos
-
 static void liberar_slot(int s) {
     close(P.slots[s].fd_up);
     P.slots[s].task_idx = -1;
@@ -229,7 +207,6 @@ static void liberar_slot(int s) {
     P.sin_recursos = false;
 }
 
-// Decide si el id esta en una lista separada por comas (para inyectar fallas de prueba).
 static int id_en_lista(const char* lista, const char* id) {
     size_t largo = strlen(id);
     const char* p = lista;
@@ -249,7 +226,6 @@ static int id_en_lista(const char* lista, const char* id) {
     return 0;
 }
 
-// Codigo del proceso hijo. Nunca retorna.
 static _Noreturn void hijo(const Activity* a, int up_r, int up_w, int down_r, int down_w) {
     struct sigaction sa;
     char buf[4096];
@@ -257,9 +233,6 @@ static _Noreturn void hijo(const Activity* a, int up_r, int up_w, int down_r, in
     struct timespec t;
     int insumos = 0;
     int len;
-
-    // Primero ignorar SIGINT (aun bloqueada) y recien despues restaurar la mascara:
-    // asi un Ctrl+C nunca puede matar al hijo; el unico que decide es el padre.
     memset(&sa, 0, sizeof sa);
     sigemptyset(&sa.sa_mask);
     sa.sa_handler = SIG_IGN;
@@ -267,15 +240,11 @@ static _Noreturn void hijo(const Activity* a, int up_r, int up_w, int down_r, in
     sa.sa_handler = SIG_DFL;
     sigaction(SIGCHLD, &sa, NULL);
     sigprocmask(SIG_SETMASK, &g_mask_orig, NULL);
-
-    // Cerrar todo lo que este proceso no usa (si no, el EOF de otros pipes no llega).
     close(up_r);
     close(down_w);
     for (int s = 0; s < P.n_slots; s++) {
         if (P.slots[s].task_idx >= 0) close(P.slots[s].fd_up);
     }
-
-    // Leer los mensajes de las dependencias hasta EOF (uno por linea).
     for (;;) {
         ssize_t r = read(down_r, buf, sizeof buf);
         if (r < 0) {
@@ -288,14 +257,11 @@ static _Noreturn void hijo(const Activity* a, int up_r, int up_w, int down_r, in
         }
     }
     close(down_r);
-
-    // Simular el trabajo durmiendo (sin gastar CPU).
     t.tv_sec = a->duration_ms / 1000;
     t.tv_nsec = (long)(a->duration_ms % 1000) * 1000000L;
     while (nanosleep(&t, &t) < 0 && errno == EINTR) {
     }
 
-    // Fallas de prueba, justo donde deberia escribir su mensaje.
     if (id_en_lista(getenv("PLANIFICADOR_MATAR"), a->id)) {
         kill(getpid(), SIGKILL);
         _exit(4);
@@ -313,8 +279,6 @@ static _Noreturn void hijo(const Activity* a, int up_r, int up_w, int down_r, in
     _exit(0);
 }
 
-// Lanza la actividad i. Devuelve 0 si se lanzo (o si quedo marcada como fallida)
-// y 1 si faltan recursos y conviene reintentar cuando termine algun hijo.
 static int lanzar(int i) {
     Activity* A = P.dag->array;
     int up[2] = {-1, -1};
@@ -355,7 +319,6 @@ static int lanzar(int i) {
         return 0;
     }
 
-    // Padre: cerrar los extremos que no usa y registrar al hijo.
     close(up[1]);
     close(down[0]);
     s = P.libres[--P.n_libres];
@@ -366,20 +329,18 @@ static int lanzar(int i) {
     marcar(i, CORRIENDO);
     log_linea("[INICIO]   %s %s (pid %d)\n", A[i].id, A[i].name, (int)pid);
 
-    // Entregar por el pipe de bajada los mensajes de las dependencias.
     for (int k = P.dep_off[i]; k < P.dep_off[i + 1]; k++) {
         const char* m = A[P.dep_idx[k]].output_msg;
         char linea[MAX_MSG + 2];
         int n = snprintf(linea, sizeof linea, "%s\n", m);
 
         if (n >= (int)sizeof linea) n = (int)sizeof linea - 1;
-        if (escribir_todo(down[1], linea, (size_t)n) < 0) break;   // el hijo murio antes de leer
+        if (escribir_todo(down[1], linea, (size_t)n) < 0) break; 
     }
     close(down[1]);
     return 0;
 }
 
-// Clasifica a un hijo que ya termino (despues de waitpid).
 static void procesar_hijo(pid_t pid, int status) {
     int s = -1;
     int i;
@@ -396,7 +357,6 @@ static void procesar_hijo(pid_t pid, int status) {
     if (s < 0) return;
     i = P.slots[s].task_idx;
 
-    // El hijo ya murio: todos los extremos de escritura estan cerrados, leer no bloquea.
     n = leer_mensaje(P.slots[s].fd_up, msg, sizeof msg);
     liberar_slot(s);
 
@@ -418,8 +378,6 @@ static void procesar_hijo(pid_t pid, int status) {
     }
 }
 
-// Cosecha a todos los hijos que ya terminaron, sin bloquear.
-// Las senales se funden: un solo SIGCHLD puede representar a varios hijos.
 static void cosechar(void) {
     for (;;) {
         int status;
@@ -435,16 +393,13 @@ static void cosechar(void) {
     }
 }
 
-// Ctrl+C: aborta todo y deja el sistema limpio (sin zombies ni huerfanos).
 static void abortar_todo(void) {
     Activity* A = P.dag->array;
 
     log_linea("[SEREMI]   Inspeccion detectada (SIGINT): abortando todas las actividades\n");
 
-    // Lo que ya habia terminado se clasifica normalmente.
     cosechar();
 
-    // A los que siguen vivos: SIGKILL (no se puede ignorar y no tienen nada que limpiar).
     for (int s = 0; s < P.n_slots; s++) {
         int i = P.slots[s].task_idx;
         if (i < 0) continue;
@@ -454,7 +409,6 @@ static void abortar_todo(void) {
         marcar(i, ABORTADA);
     }
 
-    // Cosechar a todos hasta que no quede ningun hijo (ECHILD).
     for (;;) {
         int status;
         pid_t pid = waitpid(-1, &status, 0);
@@ -473,7 +427,6 @@ static void abortar_todo(void) {
         }
     }
 
-    // Lo que aun no habia partido tambien se aborta.
     for (int i = 0; i < P.dag->count; i++) {
         if (P.estado[i] == PENDIENTE || P.estado[i] == LISTA) {
             marcar(i, ABORTADA);
@@ -482,9 +435,6 @@ static void abortar_todo(void) {
     }
 }
 
-// ---------------------------------------------------------------- inicio
-
-// Sube el limite de descriptores al maximo permitido y ajusta K para no pasarse.
 static int ajustar_k(int k, int n) {
     struct rlimit rl;
     long limite = 1000;
@@ -510,7 +460,7 @@ static int ajustar_k(int k, int n) {
                 k, limite);
         k = (int)limite;
     }
-    if (n > 0 && k > n) k = n;   // no tiene sentido tener mas ranuras que actividades
+    if (n > 0 && k > n) k = n; 
     return k;
 }
 
@@ -533,10 +483,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Una linea por vez en el log, aunque la salida este redirigida.
     setvbuf(stdout, NULL, _IOLBF, 0);
 
-    // Se instalan al arrancar: un Ctrl+C durante la lectura queda pendiente y se atiende despues.
     configurar_senales();
 
     raw_plan = parser_parse_file(argv[1]);
@@ -558,7 +506,6 @@ int main(int argc, char* argv[]) {
 
     K = ajustar_k((int)k_pedido, n);
 
-    // Reservar toda la memoria de una vez.
     P.estado = calloc((size_t)n, sizeof *P.estado);
     P.dep_off = calloc((size_t)n + 1, sizeof *P.dep_off);
     P.cola = malloc((size_t)n * sizeof *P.cola);
@@ -579,7 +526,6 @@ int main(int argc, char* argv[]) {
     }
     P.n_libres = K;
 
-    // Dependencias de cada actividad (el DAG solo guarda a quien despierta cada una).
     {
         Activity* A = P.dag->array;
         int* cursor;
@@ -605,14 +551,12 @@ int main(int argc, char* argv[]) {
             }
         free(cursor);
 
-        // Las actividades sin dependencias parten listas, en el orden del archivo.
         for (int i = 0; i < n; i++)
             if (A[i].in_degree == 0) encolar(i);
     }
 
     log_linea("[PLANIFICADOR] Iniciando simulacion con K = %d (%d actividades)\n", K, n);
 
-    // ------------------------------------------------ ciclo principal
     for (;;) {
         if (hay_sigint()) {
             abortar_todo();
@@ -620,27 +564,23 @@ int main(int argc, char* argv[]) {
             break;
         }
 
-        // LANZAR: mientras haya actividades listas y cupo (activos < K).
         while (P.q_front < P.q_rear && P.activos < K && !P.sin_recursos) {
             int i = P.cola[P.q_front++];
 
             if (lanzar(i) == 1) {
-                P.cola[--P.q_front] = i;   // reencolar al frente y esperar a que termine alguien
+                P.cola[--P.q_front] = i; 
                 break;
             }
             if (hay_sigint()) break;
         }
         if (hay_sigint()) continue;
 
-        // COSECHAR: aqui se libera el cupo de K (waitpid), se leen los mensajes y se propagan fallas.
         cosechar();
 
         if (P.terminadas + P.fallidas + P.abortadas == n) break;
         if (P.q_front < P.q_rear && P.activos < K && !P.sin_recursos) continue;
 
         if (P.activos == 0) {
-            // Sin procesos ni actividades listas pero con trabajo pendiente: no deberia pasar
-            // (los ciclos se rechazan al cargar el plan). Se corta para no quedar colgado.
             fprintf(stderr, "Error interno: el plan no puede avanzar.\n");
             for (int i = 0; i < n; i++) {
                 if (P.estado[i] == PENDIENTE || P.estado[i] == LISTA) marcar(i, ABORTADA);
@@ -649,8 +589,6 @@ int main(int argc, char* argv[]) {
             break;
         }
 
-        // DORMIR sin gastar CPU. sigsuspend desbloquea las senales y duerme en un solo paso
-        // indivisible: si ya habia una pendiente, vuelve de inmediato (no se pierde ningun aviso).
         sigsuspend(&g_mask_orig);
     }
 

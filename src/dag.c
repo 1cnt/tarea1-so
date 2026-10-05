@@ -127,8 +127,8 @@ DAG* dag_build(RawPlan* plan, char* err, size_t err_tam) {
                         "La actividad '%s' tiene una duracion negativa", raw->id);
             goto limpiar;
         }
-        strncpy(act->id, raw->id, MAX_ID_LEN - 1);
-        strncpy(act->name, raw->name, MAX_NAME_LEN - 1);
+        snprintf(act->id, MAX_ID_LEN, "%s", raw->id);
+        snprintf(act->name, MAX_NAME_LEN, "%s", raw->name);
         act->duration_ms = raw->duration_ms;
         indice[i].id = raw->id;
         indice[i].pos = i;
